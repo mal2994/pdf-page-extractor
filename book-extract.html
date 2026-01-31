@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <title>PDF Page Extractor</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      max-width: 600px;
+      margin: 40px auto;
+    }
+
+    input,
+    button {
+      margin-top: 10px;
+      width: 100%;
+    }
+
+    #outline {
+      border: 1px solid #ddd;
+      padding: 10px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+
+    #outline li {
+      cursor: pointer;
+      margin-left: 10px;
+    }
+
+    .outline-label {
+      cursor: pointer;
+    }
+
+    .outline-label:hover {
+      text-decoration: underline;
+    }
+
+
+    #outline li.active {
+      background: #eef;
+      font-weight: 600;
+    }
+  </style>
+</head>
+
+<body>
+
+  <h2>PDF Page Extractor</h2>
+
+  <input type="file" id="pdfFile" accept="application/pdf" />
+  <input type="text" id="pageRange" placeholder="Page range (e.g. 2-5)" />
+  <button id="extractBtn">Extract & Download</button>
+  <h3>Outline</h3>
+  <ul id="outline">[outline]</ul>
+
+  <!-- Extraction logic: -->
+  <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
+  <!-- Outline logic: -->
+  <script src="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+  </script>
+
+  <script>
+    const { PDFDocument } = PDFLib;
+
+    document.getElementById('extractBtn').addEventListener('click', async () => {
+      const fileInput = document.getElementById('pdfFile');
+      const rangeInput = document.getElementById('pageRange').value;
+
+      if (!fileInput.files.length) {
+        alert('Please upload a PDF');
+        return;
+      }
+
+      const match = rangeInput.match(/^(\d+)\s*-\s*(\d+)$/);
+      if (!match) {
+        alert('Invalid page range');
+        return;
+      }
+
+      let [_, start, end] = match;
+      start = parseInt(start, 10);
+      end = parseInt(end, 10);
+
+      if (start > end || start < 1) {
+        alert('Invalid page numbers');
+        return;
+      }
+
+      const file = fileInput.files[0];
+      const bytes = await file.arrayBuffer();
+
+      const srcPdf = await PDFDocument.load(bytes);
+      const newPdf = await PDFDocument.create();
+
+      const pageCount = srcPdf.getPageCount();
+      if (end > pageCount) {
+        alert(`PDF only has ${pageCount} pages`);
+        return;
+      }
+
+      const pages = await newPdf.copyPages(
+        srcPdf,
+        Array.from({ length: end - start + 1 }, (_, i) => start - 1 + i)
+      );
+
+      pages.forEach(p => newPdf.addPage(p));
+
+      const newBytes = await newPdf.save();
+      const blob = new Blob([newBytes], { type: 'application/pdf' });
+
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      const baseFileName = file.name.replace(/\.pdf$/i, '');
+      link.download = `${baseFileName}-${start}-${end}.pdf`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    });
+  </script>
+
+  <script>
+    async function flattenOutline(items, pdf, depth = 0, result = []) {
+      for (const item of items) {
+        if (item.dest) {
+          let destArray =
+            typeof item.dest === 'string'
+              ? await pdf.getDestination(item.dest)
+              : item.dest;
+
+          if (destArray[0]) {
+            const pageIndex = await pdf.getPageIndex(destArray[0]);
+            result.push({
+              title: item.title,
+              page: pageIndex + 1,
+              depth
+            });
+          }
+        }
+
+        if (item.items?.length) {
+          await flattenOutline(item.items, pdf, depth + 1, result);
+        }
+      }
+      return result;
+    }
+
+    async function renderOutline(items, parent, depth = 0) {
+      for (const item of items) {
+        const li = document.createElement('li');
+
+        li.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          if (!item.dest) return;
+
+          let destArray;
+
+          if (typeof item.dest === 'string') {
+            destArray = await loadedPdf.getDestination(item.dest);
+          } else {
+            destArray = item.dest;
+          }
+
+          if (!destArray) return;
+
+          const pageIndex = await loadedPdf.getPageIndex(destArray[0]);
+
+          const startPage = pageIndex + 1;
+          const thisDepth = depth;
+
+          const currentIndex = flatOutline.findIndex(
+            o => o.page === startPage && o.depth === thisDepth
+          );
+
+          let endPage = loadedPdf.numPages;
+          for (let i = currentIndex + 1; i < flatOutline.length; i++) {
+            if (flatOutline[i].depth === thisDepth) {
+              endPage = flatOutline[i].page - 0;
+              break;
+            }
+          }
+
+          const rangeInput = document.getElementById('pageRange');
+          rangeInput.value =
+            startPage === endPage
+              ? `${startPage}`
+              : `${startPage}-${endPage}`; // why is this giving backwards
+          // : `${Math.min(startPage, endPage)}-${Math.max(startPage, endPage)}`;
+        });
+
+        parent.appendChild(li);
+        const label = document.createElement('span');
+        label.textContent = item.title;
+        label.className = 'outline-label';
+        li.appendChild(label);
+
+
+        if (item.items && item.items.length) {
+          const ul = document.createElement('ul');
+          li.appendChild(ul);
+          await renderOutline(item.items, ul, depth + 1);
+        }
+      }
+    }
+
+    let flatOutline = [];
+    let loadedPdf = null;
+
+    async function loadOutline(file) {
+      const buffer = await file.arrayBuffer();
+      loadedPdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+
+      const outline = await loadedPdf.getOutline();
+      const outlineEl = document.getElementById('outline');
+      outlineEl.innerHTML = '';
+
+      if (!outline) {
+        outlineEl.innerHTML = '<li>No outline found</li>';
+        return;
+      }
+
+      // Build flat outline index
+      flatOutline = await flattenOutline(outline, loadedPdf);
+
+      await renderOutline(outline, outlineEl);
+    }
+
+    document.getElementById('pdfFile').addEventListener('change', (e) => {
+      if (e.target.files.length) {
+        loadOutline(e.target.files[0]);
+      }
+    });
+  </script>
+
+
+</body>
+
+</html>
