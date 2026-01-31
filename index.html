@@ -188,8 +188,7 @@
           rangeInput.value =
             startPage === endPage
               ? `${startPage}`
-              : `${startPage}-${endPage}`; // why is this giving backwards
-          // : `${Math.min(startPage, endPage)}-${Math.max(startPage, endPage)}`;
+              : `${startPage}-${endPage}`; 
         });
 
         parent.appendChild(li);
@@ -223,7 +222,6 @@
         return;
       }
 
-      // Build flat outline index
       flatOutline = await flattenOutline(outline, loadedPdf);
 
       await renderOutline(outline, outlineEl);
