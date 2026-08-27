@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="UTF-8" />
-  <title>PDF Page Extractor</title>
+  <title>PDF & EPUB Extractor</title>
   <style>
     body {
       font-family: system-ui, sans-serif;
@@ -47,16 +47,17 @@
 
 <body>
 
-  <h2>PDF Page Extractor</h2>
+  <h2>PDF & EPUB Extractor</h2>
 
-  <input type="file" id="pdfFile" accept="application/pdf" />
-  <input type="text" id="pageRange" placeholder="Page range (e.g. 2-5)" />
+  <input type="file" id="bookFile" accept="application/pdf,.epub" />
+  <input type="text" id="pageRange" placeholder="Page or chapter range (e.g. 2-5)" />
   <button id="extractBtn">Extract & Download</button>
   <h3>Outline</h3>
   <ul id="outline">[outline]</ul>
 
   <!-- Extraction logic: -->
   <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
+  <script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
   <!-- Outline logic: -->
   <script src="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
 
@@ -68,37 +69,12 @@
   <script>
     const { PDFDocument } = PDFLib;
 
-    document.getElementById('extractBtn').addEventListener('click', async () => {
-      const fileInput = document.getElementById('pdfFile');
-      const rangeInput = document.getElementById('pageRange').value;
-
-      if (!fileInput.files.length) {
-        alert('Please upload a PDF');
-        return;
-      }
-
-      const match = rangeInput.match(/^(\d+)\s*-\s*(\d+)$/);
-      if (!match) {
-        alert('Invalid page range');
-        return;
-      }
-
-      let [_, start, end] = match;
-      start = parseInt(start, 10);
-      end = parseInt(end, 10);
-
-      if (start > end || start < 1) {
-        alert('Invalid page numbers');
-        return;
-      }
-
-      const file = fileInput.files[0];
+    async function extractPdf(file, start, end) {
       const bytes = await file.arrayBuffer();
-
       const srcPdf = await PDFDocument.load(bytes);
       const newPdf = await PDFDocument.create();
-
       const pageCount = srcPdf.getPageCount();
+
       if (end > pageCount) {
         alert(`PDF only has ${pageCount} pages`);
         return;
@@ -108,18 +84,87 @@
         srcPdf,
         Array.from({ length: end - start + 1 }, (_, i) => start - 1 + i)
       );
-
       pages.forEach(p => newPdf.addPage(p));
 
       const newBytes = await newPdf.save();
       const blob = new Blob([newBytes], { type: 'application/pdf' });
+      downloadBlob(blob, `${file.name.replace(/\.pdf$/i, '')}-${start}-${end}.pdf`);
+    }
 
+    async function extractEpub(file, start, end) {
+      const zip = await JSZip.loadAsync(await file.arrayBuffer());
+      const container = parseXml(await zip.file('META-INF/container.xml').async('text'));
+      const rootfile = container.querySelector('rootfile');
+      if (!rootfile) throw new Error('The EPUB package file could not be found.');
+
+      const opfPath = rootfile.getAttribute('full-path');
+      const opf = parseXml(await zip.file(opfPath).async('text'));
+      const spine = opf.querySelector('spine');
+      if (!spine) throw new Error('The EPUB spine could not be found.');
+      const itemrefs = [...spine.querySelectorAll(':scope > itemref')];
+      if (!itemrefs.length || end > itemrefs.length) {
+        alert(`EPUB only has ${itemrefs.length} chapters`);
+        return;
+      }
+
+      const selectedIds = new Set(itemrefs.slice(start - 1, end).map(ref => ref.getAttribute('idref')));
+      itemrefs.forEach(ref => {
+        if (!selectedIds.has(ref.getAttribute('idref'))) ref.remove();
+      });
+
+      zip.file(opfPath, new XMLSerializer().serializeToString(opf));
+      const output = await zip.generateAsync({ type: 'blob', mimeType: 'application/epub+zip' });
+      downloadBlob(output, `${file.name.replace(/\.epub$/i, '')}-${start}-${end}.epub`);
+    }
+
+    function parseXml(text) {
+      const xml = new DOMParser().parseFromString(text, 'application/xml');
+      if (xml.querySelector('parsererror')) throw new Error('The EPUB contains invalid XML.');
+      return xml;
+    }
+
+    function downloadBlob(blob, name) {
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
-      const baseFileName = file.name.replace(/\.pdf$/i, '');
-      link.download = `${baseFileName}-${start}-${end}.pdf`;
+      link.download = name;
       link.click();
       URL.revokeObjectURL(link.href);
+    }
+
+    document.getElementById('extractBtn').addEventListener('click', async () => {
+      const fileInput = document.getElementById('bookFile');
+      const rangeInput = document.getElementById('pageRange').value;
+
+      if (!fileInput.files.length) {
+        alert('Please upload a PDF or EPUB');
+        return;
+      }
+
+      const match = rangeInput.match(/^(\d+)(?:\s*-\s*(\d+))?$/);
+      if (!match) {
+        alert('Invalid page range');
+        return;
+      }
+
+      let [_, start, end] = match;
+      start = parseInt(start, 10);
+      end = end ? parseInt(end, 10) : start;
+
+      if (start > end || start < 1) {
+        alert('Invalid page numbers');
+        return;
+      }
+
+      const file = fileInput.files[0];
+      try {
+        if (/\.epub$/i.test(file.name)) {
+          await extractEpub(file, start, end);
+        } else {
+          await extractPdf(file, start, end);
+        }
+      } catch (error) {
+        alert(`Could not extract the file: ${error.message}`);
+      }
     });
   </script>
 
@@ -210,6 +255,11 @@
     let loadedPdf = null;
 
     async function loadOutline(file) {
+      if (/\.epub$/i.test(file.name)) {
+        await loadEpubOutline(file);
+        return;
+      }
+
       const buffer = await file.arrayBuffer();
       loadedPdf = await pdfjsLib.getDocument({ data: buffer }).promise;
 
@@ -227,9 +277,40 @@
       await renderOutline(outline, outlineEl);
     }
 
-    document.getElementById('pdfFile').addEventListener('change', (e) => {
+    async function loadEpubOutline(file) {
+      const zip = await JSZip.loadAsync(await file.arrayBuffer());
+      const container = parseXml(await zip.file('META-INF/container.xml').async('text'));
+      const rootfile = container.querySelector('rootfile');
+      if (!rootfile) throw new Error('The EPUB package file could not be found.');
+
+      const opf = parseXml(await zip.file(rootfile.getAttribute('full-path')).async('text'));
+      const spine = opf.querySelector('spine');
+      if (!spine) throw new Error('The EPUB spine could not be found.');
+
+      const items = [...spine.querySelectorAll(':scope > itemref')];
+      const outlineEl = document.getElementById('outline');
+      outlineEl.innerHTML = '';
+      flatOutline = items.map((item, index) => ({
+        title: item.getAttribute('idref'),
+        page: index + 1,
+        depth: 0
+      }));
+
+      items.forEach((item, index) => {
+        const li = document.createElement('li');
+        li.textContent = `Chapter ${index + 1} (${item.getAttribute('idref')})`;
+        li.addEventListener('click', () => {
+          document.getElementById('pageRange').value = `${index + 1}`;
+        });
+        outlineEl.appendChild(li);
+      });
+    }
+
+    document.getElementById('bookFile').addEventListener('change', (e) => {
       if (e.target.files.length) {
-        loadOutline(e.target.files[0]);
+        loadOutline(e.target.files[0]).catch(error => {
+          alert(`Could not read the file: ${error.message}`);
+        });
       }
     });
   </script>
