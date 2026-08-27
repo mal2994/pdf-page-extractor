@@ -17,6 +17,12 @@
       width: 100%;
     }
 
+    #driveStatus {
+      color: #666;
+      font-size: 0.9rem;
+      min-height: 1.2em;
+    }
+
     #outline {
       border: 1px solid #ddd;
       padding: 10px;
@@ -50,6 +56,8 @@
   <h2>PDF & EPUB Extractor</h2>
 
   <input type="file" id="bookFile" accept="application/pdf,.epub" />
+  <button id="driveBtn" type="button">Choose from Google Drive</button>
+  <div id="driveStatus" role="status"></div>
   <input type="text" id="pageRange" placeholder="Page or chapter range (e.g. 2-5)" />
   <button id="extractBtn">Extract & Download</button>
   <h3>Outline</h3>
@@ -58,6 +66,8 @@
   <!-- Extraction logic: -->
   <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
   <script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="https://apis.google.com/js/api.js"></script>
+  <script src="https://accounts.google.com/gsi/client"></script>
   <!-- Outline logic: -->
   <script src="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
 
@@ -68,6 +78,88 @@
 
   <script>
     const { PDFDocument } = PDFLib;
+    const GOOGLE_CLIENT_ID = '';
+    const GOOGLE_API_KEY = '';
+    const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
+    let driveAccessToken = null;
+    let tokenClient = null;
+    let pickerReady = false;
+
+    function setDriveStatus(message) {
+      document.getElementById('driveStatus').textContent = message;
+    }
+
+    function initializeDrive() {
+      const driveButton = document.getElementById('driveBtn');
+      if (!GOOGLE_CLIENT_ID || !GOOGLE_API_KEY) {
+        driveButton.disabled = true;
+        setDriveStatus('Add a Google OAuth client ID and API key in the script to enable Drive.');
+        return;
+      }
+
+      tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: GOOGLE_CLIENT_ID,
+        scope: DRIVE_SCOPE,
+        callback: tokenResponse => {
+          if (tokenResponse.error) {
+            setDriveStatus('Google Drive authorization was cancelled.');
+            return;
+          }
+          driveAccessToken = tokenResponse.access_token;
+          createDrivePicker();
+        }
+      });
+
+      gapi.load('picker', () => {
+        pickerReady = true;
+        driveButton.disabled = false;
+      });
+    }
+
+    function createDrivePicker() {
+      const view = new google.picker.View(google.picker.ViewId.DOCS);
+      view.setMimeTypes('application/pdf,application/epub+zip');
+      const picker = new google.picker.PickerBuilder()
+        .setDeveloperKey(GOOGLE_API_KEY)
+        .setAppId(GOOGLE_CLIENT_ID.split('.')[0])
+        .setOAuthToken(driveAccessToken)
+        .addView(view)
+        .setCallback(handleDriveSelection)
+        .build();
+      picker.setVisible(true);
+    }
+
+    async function handleDriveSelection(data) {
+      if (data.action !== google.picker.Action.PICKED) return;
+
+      const selected = data.docs[0];
+      setDriveStatus(`Downloading ${selected.name}...`);
+      try {
+        const response = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(selected.id)}?alt=media`,
+          { headers: { Authorization: `Bearer ${driveAccessToken}` } }
+        );
+        if (!response.ok) throw new Error(`Drive returned ${response.status}.`);
+
+        const blob = await response.blob();
+        const file = new File([blob], selected.name, { type: selected.mimeType });
+        const dataTransfer = new DataTransfer();
+        dataTransfer.items.add(file);
+        document.getElementById('bookFile').files = dataTransfer.files;
+        document.getElementById('bookFile').dispatchEvent(new Event('change'));
+        setDriveStatus(`Selected ${selected.name}`);
+      } catch (error) {
+        setDriveStatus(`Could not download the Drive file: ${error.message}`);
+      }
+    }
+
+    document.getElementById('driveBtn').addEventListener('click', () => {
+      if (!pickerReady) return;
+      setDriveStatus('Connecting to Google Drive...');
+      tokenClient.requestAccessToken({ prompt: driveAccessToken ? '' : 'consent' });
+    });
+
+    if (window.google?.accounts?.oauth2) initializeDrive();
 
     async function extractPdf(file, start, end) {
       const bytes = await file.arrayBuffer();
