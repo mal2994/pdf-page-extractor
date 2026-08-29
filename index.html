@@ -78,9 +78,10 @@
 
   <script>
     const { PDFDocument } = PDFLib;
-    const GOOGLE_CLIENT_ID = '';
-    const GOOGLE_API_KEY = '';
+    const GOOGLE_CLIENT_ID = '241044141390-64c2t0ekm97qqureqs0mdk34urfucjh3.apps.googleusercontent.com';
+    const GOOGLE_API_KEY = 'AIzaSyBukJ2J-IWy3VRhotUv3mvs1_Kt4a441IU';
     const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
+    const IS_FILE_ORIGIN = window.location.protocol === 'file:';
     let driveAccessToken = null;
     let tokenClient = null;
     let pickerReady = false;
@@ -91,6 +92,12 @@
 
     function initializeDrive() {
       const driveButton = document.getElementById('driveBtn');
+      if (IS_FILE_ORIGIN) {
+        driveButton.disabled = true;
+        setDriveStatus('Google Drive auth requires a web origin such as http://localhost:8000. Serve this app over localhost and add that origin to the OAuth client before trying again.');
+        return;
+      }
+
       if (!GOOGLE_CLIENT_ID || !GOOGLE_API_KEY) {
         driveButton.disabled = true;
         setDriveStatus('Add a Google OAuth client ID and API key in the script to enable Drive.');

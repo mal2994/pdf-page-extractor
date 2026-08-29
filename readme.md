@@ -7,8 +7,9 @@ The extractor also accepts EPUB files. For EPUBs, the range selects chapters in 
 1. In Google Cloud Console, create or select a project.
 2. Enable the Google Picker API and Google Drive API.
 3. Create an API key and an OAuth 2.0 Web application client ID.
-4. Add the URL where this app runs to the OAuth client's authorized JavaScript origins. For local use, serve this folder over `http://localhost` rather than opening `index.html` directly.
+4. Add the exact origin where this app runs to the OAuth client's authorized JavaScript origins. For local use, serve this folder over `http://localhost` or `http://localhost:8000` and add that exact origin to the OAuth client. Do not open `index.html` directly from the filesystem; Google rejects `file://` origins with `invalid_request`.
 5. Set `GOOGLE_CLIENT_ID` and `GOOGLE_API_KEY` near the top of the main script in `index.html`.
+6. Run a local web server from this folder, for example: `python -m http.server 8000` and then open `http://localhost:8000`.
 
 The Drive integration requests read-only access, filters for PDF and EPUB files, and downloads the selected file locally for extraction. No Drive files are uploaded or modified.
 
