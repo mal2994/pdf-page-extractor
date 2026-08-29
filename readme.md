@@ -1,6 +1,10 @@
 Make smaller PDFs or EPUBs out of your book files with this single page application. Useful for speed reading books on mobile.
 
-The extractor also accepts EPUB files. For EPUBs, the range selects chapters in the book's reading order and downloads a new EPUB containing only those chapters.
+## Useful links
+
+- [PDF Page Extractor](https://pdf-page-extractor.pages.dev/)
+- [Speed Reader](https://rsvp-reading-1.onrender.com/)
+  - [(Git repo)](https://github.com/mal2994/rsvp-reading)
 
 ## Google Drive setup
 
@@ -13,6 +17,4 @@ The extractor also accepts EPUB files. For EPUBs, the range selects chapters in 
 
 The Drive integration requests read-only access, filters for PDF and EPUB files, and downloads the selected file locally for extraction. No Drive files are uploaded or modified.
 
-- [PDF Page Extractor](https://pdf-page-extractor.pages.dev/)
-- [Speed Reader](https://rsvp-reading-1.onrender.com/)
-  - [(Git repo)](https://github.com/mal2994/rsvp-reading)
+> This project has no build step; it is a static HTML app. The Google client ID and API key are embedded in the frontend, which is normal for a browser-only app. They are restricted by allowed origins and test-user access, so they are effectively unusable to others unless they match the same origin and Gmail account. This is a pragmatic personal setup rather than a production-grade security model. Google client secret is not exposed here.
